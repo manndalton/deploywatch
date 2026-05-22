@@ -53,6 +53,14 @@ export class Poller extends EventEmitter {
     this.emit('stopped');
   }
 
+  /**
+   * Polls all registered providers once and returns their results.
+   * Useful for performing a manual refresh outside the normal interval cycle.
+   */
+  async pollAll(): Promise<PollResult[]> {
+    return Promise.all(this.providers.map((provider) => this.pollOnce(provider)));
+  }
+
   get isRunning(): boolean {
     return this.timers.size > 0;
   }
