@@ -56,6 +56,25 @@ describe("sendDesktopNotification", () => {
     );
   });
 
+  it("uses urgency derived from status when urgency is not provided", async () => {
+    vi.mocked(platform).mockReturnValue("linux");
+    vi.mocked(execFile).mockImplementation((_cmd, _args, cb: any) =>
+      cb(null, "", "")
+    );
+
+    await sendDesktopNotification({
+      title: "Deploy Failed",
+      message: "main failed on production",
+      status: "failure",
+    });
+
+    expect(execFile).toHaveBeenCalledWith(
+      "notify-send",
+      ["--urgency=critical", "Deploy Failed", "main failed on production"],
+      expect.any(Function)
+    );
+  });
+
   it("throws a descriptive error when execFile fails", async () => {
     vi.mocked(platform).mockReturnValue("linux");
     vi.mocked(execFile).mockImplementation((_cmd, _args, cb: any) =>
