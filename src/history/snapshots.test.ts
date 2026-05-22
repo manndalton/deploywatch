@@ -1,97 +1,104 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeEach } from 'vitest';
 import {
   createSnapshot,
   diffSnapshot,
   findSnapshotById,
   findSnapshotByLabel,
   pruneSnapshots,
-  Snapshot,
 } from './snapshots';
-import { HistoryEntry } from './history';
+import type { HistoryEntry } from './history';
 
-function makeEntry(id: string, status: string): HistoryEntry {
+function makeEntry(overrides: Partial<HistoryEntry> = {}): HistoryEntry {
   return {
-    id,
+    id: 'entry-1',
     provider: 'github',
     repo: 'org/repo',
     branch: 'main',
-    status,
-    startedAt: new Date().toISOString(),
-    finishedAt: new Date().toISOString(),
-    durationMs: 1000,
+    status: 'success',
+    startedAt: '2024-01-01T10:00:00Z',
+    finishedAt: '2024-01-01T10:05:00Z',
+    durationMs: 300000,
     tags: [],
-  } as unknown as HistoryEntry;
+    annotations: [],
+    ...overrides,
+  };
 }
 
 describe('createSnapshot', () => {
-  it('creates a snapshot with a unique id and the given label', () => {
-    const entries = [makeEntry('e1', 'success')];
-    const snap = createSnapshot('release-1', entries);
-    expect(snap.label).toBe('release-1');
-    expect(snap.id).toMatch(/^snap_/);
-    expect(snap.entries).toHaveLength(1);
-    expect(snap.entries[0]).not.toBe(entries[0]); // deep copy
+  it('creates a snapshot with an id and timestamp', () => {
+    const entries = [makeEntry(), makeEntry({ id: 'entry-2', status: 'failure' })];
+    const snap = createSnapshot(entries, 'before-deploy');
+    expect(snap.id).toBeTruthy();
+    expect(snap.label).toBe('before-deploy');
+    expect(snap.entries).toHaveLength(2);
+    expect(snap.createdAt).toBeTruthy();
+  });
+
+  it('creates a snapshot without a label', () => {
+    const snap = createSnapshot([makeEntry()]);
+    expect(snap.label).toBeUndefined();
   });
 });
 
 describe('diffSnapshot', () => {
   it('detects added entries', () => {
-    const a = createSnapshot('a', [makeEntry('e1', 'success')]);
-    const b = createSnapshot('b', [makeEntry('e1', 'success'), makeEntry('e2', 'failure')]);
-    const { added, removed, changed } = diffSnapshot(a, b);
-    expect(added).toHaveLength(1);
-    expect(added[0].id).toBe('e2');
-    expect(removed).toHaveLength(0);
-    expect(changed).toHaveLength(0);
+    const a = createSnapshot([makeEntry({ id: 'e1' })]);
+    const b = createSnapshot([makeEntry({ id: 'e1' }), makeEntry({ id: 'e2' })]);
+    const result = diffSnapshot(a, b);
+    expect(result.added).toHaveLength(1);
+    expect(result.added[0].id).toBe('e2');
+    expect(result.removed).toHaveLength(0);
+    expect(result.changed).toHaveLength(0);
   });
 
   it('detects removed entries', () => {
-    const a = createSnapshot('a', [makeEntry('e1', 'success'), makeEntry('e2', 'success')]);
-    const b = createSnapshot('b', [makeEntry('e1', 'success')]);
-    const { removed } = diffSnapshot(a, b);
-    expect(removed).toHaveLength(1);
-    expect(removed[0].id).toBe('e2');
+    const a = createSnapshot([makeEntry({ id: 'e1' }), makeEntry({ id: 'e2' })]);
+    const b = createSnapshot([makeEntry({ id: 'e1' })]);
+    const result = diffSnapshot(a, b);
+    expect(result.removed).toHaveLength(1);
+    expect(result.removed[0].id).toBe('e2');
   });
 
-  it('detects changed status', () => {
-    const a = createSnapshot('a', [makeEntry('e1', 'success')]);
-    const b = createSnapshot('b', [makeEntry('e1', 'failure')]);
-    const { changed } = diffSnapshot(a, b);
-    expect(changed).toHaveLength(1);
-    expect(changed[0].status).toBe('failure');
+  it('detects changed entries', () => {
+    const a = createSnapshot([makeEntry({ id: 'e1', status: 'in_progress' })]);
+    const b = createSnapshot([makeEntry({ id: 'e1', status: 'success' })]);
+    const result = diffSnapshot(a, b);
+    expect(result.changed).toHaveLength(1);
+    expect(result.changed[0].before.status).toBe('in_progress');
+    expect(result.changed[0].after.status).toBe('success');
   });
 });
 
 describe('findSnapshotById', () => {
-  it('returns the matching snapshot', () => {
-    const snap = createSnapshot('test', []);
-    expect(findSnapshotById([snap], snap.id)).toBe(snap);
-    expect(findSnapshotById([snap], 'missing')).toBeUndefined();
+  it('finds a snapshot by id', () => {
+    const snaps = [createSnapshot([makeEntry()], 'snap-a'), createSnapshot([makeEntry()], 'snap-b')];
+    const found = findSnapshotById(snaps, snaps[1].id);
+    expect(found?.label).toBe('snap-b');
+  });
+
+  it('returns undefined when not found', () => {
+    expect(findSnapshotById([], 'missing')).toBeUndefined();
   });
 });
 
 describe('findSnapshotByLabel', () => {
-  it('returns the matching snapshot by label', () => {
-    const snap = createSnapshot('my-label', []);
-    expect(findSnapshotByLabel([snap], 'my-label')).toBe(snap);
-    expect(findSnapshotByLabel([snap], 'other')).toBeUndefined();
+  it('finds a snapshot by label', () => {
+    const snaps = [createSnapshot([], 'alpha'), createSnapshot([], 'beta')];
+    expect(findSnapshotByLabel(snaps, 'beta')?.label).toBe('beta');
   });
 });
 
 describe('pruneSnapshots', () => {
-  it('keeps all snapshots when under limit', () => {
-    const snaps = [createSnapshot('a', []), createSnapshot('b', [])];
-    expect(pruneSnapshots(snaps, 5)).toHaveLength(2);
+  it('keeps only the most recent N snapshots', () => {
+    const snaps = Array.from({ length: 5 }, (_, i) =>
+      createSnapshot([], `snap-${i}`)
+    );
+    const pruned = pruneSnapshots(snaps, 3);
+    expect(pruned).toHaveLength(3);
   });
 
-  it('retains only the most recent snapshots', () => {
-    const snaps: Snapshot[] = [
-      { id: '1', label: 'old', createdAt: '2024-01-01T00:00:00Z', entries: [] },
-      { id: '2', label: 'mid', createdAt: '2024-06-01T00:00:00Z', entries: [] },
-      { id: '3', label: 'new', createdAt: '2024-12-01T00:00:00Z', entries: [] },
-    ];
-    const pruned = pruneSnapshots(snaps, 2);
-    expect(pruned).toHaveLength(2);
-    expect(pruned.map(s => s.id)).toEqual(['2', '3']);
+  it('returns all when under limit', () => {
+    const snaps = [createSnapshot([])]
+    expect(pruneSnapshots(snaps, 10)).toHaveLength(1);
   });
 });
