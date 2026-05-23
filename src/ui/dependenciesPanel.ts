@@ -19,6 +19,12 @@ export function formatDependencyRow(
   return pad(roleStr, 14) + " " + pad(key, COL_KEY) + " " + pad(label ?? "", COL_LABEL);
 }
 
+/**
+ * Renders the dependencies panel content for a given resource key.
+ * Returns an array of lines including a header, separator, and one row
+ * per dependency or dependent. If no relationships exist, returns a
+ * single informational message line.
+ */
 export function renderDependenciesPanel(
   store: DependencyStore,
   focusKey: string
