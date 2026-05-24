@@ -72,3 +72,19 @@ export function resetThrottle(
   delete entries[key];
   return { entries };
 }
+
+/**
+ * Returns the number of milliseconds remaining before the key is allowed
+ * to fire again, or 0 if it is not currently throttled.
+ */
+export function cooldownRemaining(
+  store: ThrottleStore,
+  key: string,
+  cooldownMs: number,
+  now: number = Date.now()
+): number {
+  const entry = store.entries[key];
+  if (!entry) return 0;
+  const elapsed = now - entry.lastFiredAt;
+  return Math.max(0, cooldownMs - elapsed);
+}
