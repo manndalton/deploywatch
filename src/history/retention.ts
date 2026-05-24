@@ -29,6 +29,13 @@ export function loadRetentionPolicy(
   return { maxAgeDays, maxEntries, keepFailures };
 }
 
+/**
+ * Returns true if the given entry is considered a failure or error.
+ */
+function isFailure(e: HistoryEntry): boolean {
+  return e.status === "failure" || e.status === "error";
+}
+
 export function applyRetentionPolicy(
   entries: HistoryEntry[],
   policy: RetentionPolicy
@@ -39,7 +46,7 @@ export function applyRetentionPolicy(
     const ts = new Date(e.timestamp).getTime();
     if (ts < cutoff) {
       // Always keep failures if policy demands it
-      if (policy.keepFailures && (e.status === "failure" || e.status === "error")) {
+      if (policy.keepFailures && isFailure(e)) {
         return true;
       }
       return false;
@@ -58,7 +65,7 @@ export function applyRetentionPolicy(
       const capped = retained.slice(0, policy.maxEntries);
       const failures = retained
         .slice(policy.maxEntries)
-        .filter((e) => e.status === "failure" || e.status === "error");
+        .filter(isFailure);
       retained = [...capped, ...failures];
       retained.sort(
         (a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
