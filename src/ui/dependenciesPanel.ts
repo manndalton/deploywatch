@@ -1,84 +1,72 @@
-import * as blessed from "blessed";
+import type { Widgets } from 'blessed';
 import {
-  DependencyStore,
+  emptyDependencyStore,
   getDependencies,
-  getDependents,
-} from "../history/dependencies";
-import { pad } from "./formatRow";
-import { totalWidth, colorizeStatus } from "./layout";
+  hasCycle,
+} from '../history/dependencies';
+import type { DependencyStore } from '../history/dependencies';
+import type { HistoryEntry } from '../history/history';
+import { pad } from './formatRow';
+import { totalWidth } from './layout';
 
-const COL_KEY = 36;
-const COL_LABEL = 16;
+const COL_FROM = 28;
+const COL_TO = 28;
+const COL_CYCLE = 8;
 
 export function formatDependencyRow(
-  role: "depends-on" | "dependent",
-  key: string,
-  label?: string
+  from: HistoryEntry,
+  to: HistoryEntry,
+  cyclic: boolean,
 ): string {
-  const roleStr = role === "depends-on" ? "→ needs" : "← needed by";
-  return pad(roleStr, 14) + " " + pad(key, COL_KEY) + " " + pad(label ?? "", COL_LABEL);
+  const fromLabel = pad(from.repo, COL_FROM);
+  const toLabel = pad(to.repo, COL_TO);
+  const cycleFlag = cyclic ? '{red-fg}CYCLE{/red-fg}' : pad('', COL_CYCLE);
+  return `${fromLabel} → ${toLabel} ${cycleFlag}`;
 }
 
-/**
- * Renders the dependencies panel content for a given resource key.
- * Returns an array of lines including a header, separator, and one row
- * per dependency or dependent. If no relationships exist, returns a
- * single informational message line.
- */
 export function renderDependenciesPanel(
   store: DependencyStore,
-  focusKey: string
-): string[] {
-  const lines: string[] = [];
+  entries: HistoryEntry[],
+): string {
+  const byId = new Map<string, HistoryEntry>(entries.map((e) => [e.id, e]));
+  const edges = getDependencies(store);
+
+  if (edges.length === 0) {
+    return '{center}No dependencies recorded{/center}';
+  }
+
   const header =
-    pad("role", 14) + " " + pad("key", COL_KEY) + " " + pad("label", COL_LABEL);
-  lines.push(header);
-  lines.push("-".repeat(totalWidth));
+    `{bold}${pad('From', COL_FROM)} → ${pad('To', COL_TO)} ${pad('Flag', COL_CYCLE)}{/bold}`;
+  const divider = '─'.repeat(Math.min(totalWidth, COL_FROM + COL_TO + COL_CYCLE + 6));
 
-  const deps = getDependencies(store, focusKey);
-  const dependents = getDependents(store, focusKey);
+  const rows = edges.map(({ fromId, toId }) => {
+    const from = byId.get(fromId);
+    const to = byId.get(toId);
+    if (!from || !to) {
+      return pad(`[missing: ${fromId} → ${toId}]`, totalWidth);
+    }
+    const cyclic = hasCycle(store, fromId, toId);
+    return formatDependencyRow(from, to, cyclic);
+  });
 
-  if (deps.length === 0 && dependents.length === 0) {
-    lines.push("  (no dependencies)");
-    return lines;
-  }
+  return [header, divider, ...rows].join('\n');
+}
 
-  for (const d of deps) {
-    lines.push(formatDependencyRow("depends-on", d.dependsOnKey, d.label));
-  }
-  for (const d of dependents) {
-    lines.push(formatDependencyRow("dependent", d.dependentKey, d.label));
-  }
-
-  return lines;
+export interface DependenciesPanel {
+  refresh(store: DependencyStore, entries: HistoryEntry[]): void;
 }
 
 export function createDependenciesPanel(
-  screen: blessed.Widgets.Screen,
-  store: DependencyStore,
-  focusKey: string
-): blessed.Widgets.BoxElement {
-  const content = renderDependenciesPanel(store, focusKey).join("\n");
-  const box = blessed.box({
-    label: " Dependencies ",
-    top: "60%",
-    left: "0",
-    width: "100%",
-    height: "40%",
-    border: { type: "line" },
-    scrollable: true,
-    alwaysScroll: true,
-    keys: true,
-    content,
-  });
-  screen.append(box);
-  return box;
-}
+  box: Widgets.BoxElement,
+  initialStore: DependencyStore,
+  initialEntries: HistoryEntry[],
+): DependenciesPanel {
+  function refresh(store: DependencyStore, entries: HistoryEntry[]): void {
+    box.setContent(renderDependenciesPanel(store, entries));
+    box.render();
+  }
 
-export function refresh(
-  box: blessed.Widgets.BoxElement,
-  store: DependencyStore,
-  focusKey: string
-): void {
-  box.setContent(renderDependenciesPanel(store, focusKey).join("\n"));
+  refresh(initialStore, initialEntries);
+
+  return { refresh };
 }
